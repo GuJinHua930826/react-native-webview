@@ -952,16 +952,30 @@ RCTAutoInsetsProtocol>
     NSString *absoluteString = [navigationAction.request.URL.absoluteString stringByRemovingPercentEncoding];
     NSLog(@"absoluteString=%@",absoluteString);
     
-    //拦截重定向的跳转微信的 URL Scheme, 打开微信
-    if ([absoluteString hasPrefix:@"weixin://"]) {
-        decisionHandler(WKNavigationActionPolicyAllow);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if ([[UIApplication sharedApplication] canOpenURL:navigationAction.request.URL]) {
-                [[UIApplication sharedApplication] openURL:navigationAction.request.URL];
-            } else {
-                //未安装微信
-            }
-        });
+    NSString *schemeString = @"elitepay.cn://wxpaycallback/";
+    static NSString *endPayRedirectURL = nil;
+    
+    // 微信支付回调处理
+    if ([absoluteString isEqualToString:schemeString]) {
+        decisionHandler(WKNavigationActionPolicyCancel);
+        return;
+    }
+    if ([absoluteString hasPrefix:@"https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb"] && ![absoluteString hasSuffix:[NSString stringWithFormat:@"redirect_url=%@",schemeString]]) {
+        decisionHandler(WKNavigationActionPolicyCancel);
+        
+        NSString *redirectUrl = nil;
+        if ([absoluteString containsString:@"redirect_url="]) {
+            NSRange redirectRange = [absoluteString rangeOfString:@"redirect_url"];
+            endPayRedirectURL =  [absoluteString substringFromIndex:redirectRange.location + redirectRange.length + 1];
+            redirectUrl = [[absoluteString substringToIndex:redirectRange.location] stringByAppendingString:[NSString stringWithFormat:@"redirect_url=%@",schemeString]];
+        } else {
+            redirectUrl = [absoluteString stringByAppendingString:[NSString stringWithFormat:@"&redirect_url=%@",schemeString]];
+        }
+        
+        NSMutableURLRequest *newRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:redirectUrl] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:30];
+        newRequest.allHTTPHeaderFields = req.allHTTPHeaderFields;
+        newRequest.URL = [NSURL URLWithString:redirectUrl];
+        [webView loadRequest:newRequest];
         return;
     }
     
