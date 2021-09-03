@@ -965,9 +965,12 @@ RCTAutoInsetsProtocol>
         
         NSString *redirectUrl = nil;
         if ([absoluteString containsString:@"redirect_url="]) {
-            NSRange redirectRange = [absoluteString rangeOfString:@"redirect_url"];
-            endPayRedirectURL =  [absoluteString substringFromIndex:redirectRange.location + redirectRange.length + 1];
-            redirectUrl = [[absoluteString substringToIndex:redirectRange.location] stringByAppendingString:[NSString stringWithFormat:@"redirect_url=%@",schemeString]];
+            NSURLComponents *urlComponents = [[NSURLComponents alloc] initWithString:absoluteString];
+            NSMutableDictionary *dic = [NSMutableDictionary dictionary];
+            for (NSURLQueryItem *item in urlComponents.queryItems) {
+                [dic setValue:item.value forKey:item.name];
+            }
+            redirectUrl = [absoluteString stringByReplacingOccurrencesOfString:dic[@"redirect_url"] withString:schemeString];
         } else {
             redirectUrl = [absoluteString stringByAppendingString:[NSString stringWithFormat:@"&redirect_url=%@",schemeString]];
         }
