@@ -953,6 +953,16 @@ RCTAutoInsetsProtocol>
     NSLog(@"absoluteString=%@",absoluteString);
     
     NSString *schemeString = @"elitepay.cn://wxpaycallback/";
+    
+    NSURLComponents *urlComponents = [[NSURLComponents alloc] initWithString:absoluteString];
+    NSMutableDictionary *dic = [NSMutableDictionary dictionary];
+    for (NSURLQueryItem *item in urlComponents.queryItems) {
+        [dic setValue:item.value forKey:item.name];
+    }
+    if (dic[@"redirect_url"] && ([dic[@"redirect_url"] isEqualToString:@"qld02.com://wxpaycallback/"] || [dic[@"redirect_url"] hasPrefix:@"http://www.qld02.com/"])) {
+        schemeString = @"qld02.com://wxpaycallback/";
+    }
+    
     static NSString *endPayRedirectURL = nil;
     
     // 微信支付回调处理
