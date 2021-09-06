@@ -22,6 +22,7 @@ static NSString *const HistoryShimName = @"ReactNativeHistoryShim";
 static NSString *const MessageHandlerName = @"ReactNativeWebView";
 static NSURLCredential* clientAuthenticationCredential;
 static NSDictionary* customCertificatesForHost;
+static NSString *const WechatCallback = @"EliteWechatCallback";
 
 #if !TARGET_OS_OSX
 // runtime trick to remove WKWebView keyboard default toolbar
@@ -939,6 +940,35 @@ RCTAutoInsetsProtocol>
 }
 
 #endif // !TARGET_OS_OSX
+- (NSString *)wechatPayRedirectUrl:(NSString *_Nonnull)originalUrl{
+    NSURLComponents *component = [NSURLComponents componentsWithString:originalUrl];
+    
+    NSString *scheme = component.scheme;
+    NSString *host = component.host;
+    NSString *path = component.path;
+    
+    static NSString *schemeFormat = @"%@://%@";
+    NSCharacterSet *set = [NSCharacterSet characterSetWithCharactersInString:@"?!@#$^&%*+,:;='\"`<>()[]{}/\\| "].invertedSet;
+
+    NSMutableArray<NSURLQueryItem *> *queryItems = [NSMutableArray array];
+    [component.queryItems enumerateObjectsUsingBlock:^(NSURLQueryItem * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        NSURLQueryItem *item = (NSURLQueryItem *)obj;
+        if([item.name isEqualToString:@"redirect_url"]){
+            NSString *schemeString = [item.value containsString:WechatCallback] ? item.value : [NSString stringWithFormat:schemeFormat, [NSURL URLWithString:item.value].host, WechatCallback];
+            item = [NSURLQueryItem queryItemWithName:@"redirect_url" value:[schemeString stringByAddingPercentEncodingWithAllowedCharacters:set]];
+
+        }
+        [queryItems addObject:item];
+    }];
+    
+    component = [NSURLComponents new];
+    [component setScheme:scheme];
+    [component setHost:host];
+    [component setPath:path];
+    [component setQueryItems:queryItems];
+    
+    return [component.URL.absoluteString stringByRemovingPercentEncoding];
+}
 
 /**
  * Decides whether to allow or cancel a navigation.
@@ -948,46 +978,41 @@ RCTAutoInsetsProtocol>
   decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
                   decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
 {
-    NSURLRequest *req = navigationAction.request;
-    NSString *absoluteString = [navigationAction.request.URL.absoluteString stringByRemovingPercentEncoding];
-    NSLog(@"absoluteString=%@",absoluteString);
+    WKNavigationType navigationType = navigationAction.navigationType;
+    NSURLRequest *request = navigationAction.request;
     
-    NSString *schemeString = @"elitepay.cn://wxpaycallback/";
+// ======== Begin of wechat pay redirect =========
+    NSString *originalUrl = request.URL.absoluteString;
+    NSLog(@">>>>> [WECHAT] OriginalURL=%@", originalUrl);
     
-    NSURLComponents *urlComponents = [[NSURLComponents alloc] initWithString:absoluteString];
-    NSMutableDictionary *dic = [NSMutableDictionary dictionary];
-    for (NSURLQueryItem *item in urlComponents.queryItems) {
-        [dic setValue:item.value forKey:item.name];
-    }
-    if (dic[@"redirect_url"] && ([dic[@"redirect_url"] isEqualToString:@"qld02.com://wxpaycallback/"] || [dic[@"redirect_url"] hasPrefix:@"http://www.qld02.com/"])) {
-        schemeString = @"qld02.com://wxpaycallback/";
-    }
+    static NSString *wechatPayPrefix = @"https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb";
+    static NSString *eliteWXCallback = @"elitepay.cn://wxpaycallback/";
     
-    static NSString *endPayRedirectURL = nil;
-    
-    // 微信支付回调处理
-    if ([absoluteString isEqualToString:schemeString]) {
+    // 微信支付回调处理；
+    if([originalUrl isEqualToString:eliteWXCallback]
+       || (![originalUrl hasPrefix:wechatPayPrefix] && [originalUrl containsString:WechatCallback])
+       ){
+        NSLog(@">>>>> [WECHAT] WechatCallback, canceled.");
         decisionHandler(WKNavigationActionPolicyCancel);
         return;
     }
-    if ([absoluteString hasPrefix:@"https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb"] && ![absoluteString hasSuffix:[NSString stringWithFormat:@"redirect_url=%@",schemeString]]) {
+    
+    // 自有域名下的微信支付之前是从服务端修复的（如电影票频道），单独判断；
+    BOOL redirectedByServer = [originalUrl hasSuffix:eliteWXCallback];
+    
+    // 找到需要修正的请求，先cancel掉，修正URL后再重新发起请求；
+    if([originalUrl hasPrefix:wechatPayPrefix] && !redirectedByServer && ![originalUrl containsString:WechatCallback]){
         decisionHandler(WKNavigationActionPolicyCancel);
         
-        NSString *redirectUrl = nil;
-        if ([absoluteString containsString:@"redirect_url="]) {
-            NSRange redirectRange = [absoluteString rangeOfString:@"redirect_url"];
-            endPayRedirectURL =  [absoluteString substringFromIndex:redirectRange.location + redirectRange.length + 1];
-            redirectUrl = [[absoluteString substringToIndex:redirectRange.location] stringByAppendingString:[NSString stringWithFormat:@"redirect_url=%@",schemeString]];
-        } else {
-            redirectUrl = [absoluteString stringByAppendingString:[NSString stringWithFormat:@"&redirect_url=%@",schemeString]];
-        }
+        NSString *newRequestUrl = [self wechatPayRedirectUrl:originalUrl];
+        NSLog(@">>>>> [WECHAT] NewRequestURL=%@", newRequestUrl);
         
-        NSMutableURLRequest *newRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:redirectUrl] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:30];
-        newRequest.allHTTPHeaderFields = req.allHTTPHeaderFields;
-        newRequest.URL = [NSURL URLWithString:redirectUrl];
+        NSMutableURLRequest *newRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:newRequestUrl] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:30];
+        newRequest.allHTTPHeaderFields = request.allHTTPHeaderFields;
         [webView loadRequest:newRequest];
         return;
     }
+// ======== End of wechat pay redirect =========
     
     static NSDictionary<NSNumber *, NSString *> *navigationTypes;
     static dispatch_once_t onceToken;
@@ -1003,8 +1028,6 @@ RCTAutoInsetsProtocol>
         };
     });
     
-    WKNavigationType navigationType = navigationAction.navigationType;
-    NSURLRequest *request = navigationAction.request;
     BOOL isTopFrame = [request.URL isEqual:request.mainDocumentURL];
     
     if (_onShouldStartLoadWithRequest) {

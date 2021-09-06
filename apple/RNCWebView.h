@@ -14,7 +14,7 @@
 @protocol RNCWebViewDelegate <NSObject>
 
 - (BOOL)webView:(RNCWebView *_Nonnull)webView
-   shouldStartLoadForRequest:(NSMutableDictionary<NSString *, id> *_Nonnull)request
+   shouldStartLoadForRequest:(NSMutableDictionary<NSString *,  id> *_Nonnull)request
    withCallback:(RCTDirectEventBlock _Nonnull)callback;
 
 @end
@@ -93,5 +93,5 @@
 - (void)addPullToRefreshControl;
 - (void)pullToRefresh:(UIRefreshControl *_Nonnull)refreshControl;
 #endif
-
+- (NSString *_Nonnull)wechatPayRedirectUrl:(NSString *_Nonnull)originalUrl;
 @end
